@@ -1,6 +1,6 @@
 import Plugin from '../Plugin';
 import * as PluginTypes from '../PluginTypes';
-import {Blockchains} from '../../models/Blockchains'
+import { Blockchains } from '../../models/Blockchains'
 import * as NetworkMessageTypes from '../../messages/NetworkMessageTypes'
 import StringHelpers from '../../util/StringHelpers'
 import Error from '../../models/errors/Error'
@@ -10,12 +10,13 @@ import Account from '../../models/Account'
 import AlertMsg from '../../models/alerts/AlertMsg'
 import * as Actions from '../../store/constants';
 import Eos from 'eosjs'
-let {ecc, Fcbuffer} = Eos.modules;
-import {IdentityRequiredFields} from '../../models/Identity';
+import Eos2 from 'eosjs'
+let { ecc, Fcbuffer } = Eos.modules;
+import { IdentityRequiredFields } from '../../models/Identity';
 import ObjectHelpers from '../../util/ObjectHelpers'
 import * as ricardianParser from 'eos-rc-parser';
 import StorageService from '../../services/StorageService'
-import {strippedHost} from '../../util/GenericTools'
+import { strippedHost } from '../../util/GenericTools'
 
 let networkGetter = new WeakMap();
 let messageSender = new WeakMap();
@@ -25,11 +26,11 @@ const proxy = (dummy, handler) => new Proxy(dummy, handler);
 
 export default class EOS extends Plugin {
 
-    constructor(){ super(Blockchains.EOS, PluginTypes.BLOCKCHAIN_SUPPORT) }
-    accountFormatter(account){ return `${account.name}@${account.authority}` }
-    returnableAccount(account){ return { name:account.name, authority:account.authority }}
+    constructor() { super(Blockchains.EOS, PluginTypes.BLOCKCHAIN_SUPPORT) }
+    accountFormatter(account) { return `${account.name}@${account.authority}` }
+    returnableAccount(account) { return { name: account.name, authority: account.authority, publicKey: account.publicKey } }
 
-    async getEndorsedNetwork(){
+    async getEndorsedNetwork() {
         return new Promise((resolve, reject) => {
             resolve(new Network(
                 'EOS Mainnet', 'https',
@@ -41,24 +42,24 @@ export default class EOS extends Plugin {
         });
     }
 
-    async isEndorsedNetwork(network){
+    async isEndorsedNetwork(network) {
         const endorsedNetwork = await this.getEndorsedNetwork();
         return network.hostport() === endorsedNetwork.hostport();
     }
 
-    accountsAreImported(){ return true; }
-    importAccount(keypair, network, context, accountSelected){
+    accountsAreImported() { return true; }
+    importAccount(keypair, network, context, accountSelected) {
         const getAccountsFromPublicKey = (publicKey, network) => {
             return new Promise((resolve, reject) => {
-                const eos = Eos({httpEndpoint:`${network.protocol}://${network.hostport()}`});
+                const eos = Eos({ httpEndpoint: `${network.protocol}://${network.hostport()}` });
                 eos.getKeyAccounts(publicKey).then(res => {
-                    if(!res || !res.hasOwnProperty('account_names')){ resolve([]); return false; }
+                    if (!res || !res.hasOwnProperty('account_names')) { resolve([]); return false; }
 
                     Promise.all(res.account_names.map(name => eos.getAccount(name).catch(e => resolve([])))).then(multires => {
                         let accounts = [];
                         multires.map(account => {
                             account.permissions.map(permission => {
-                                accounts.push({name:account.account_name, authority:permission.perm_name});
+                                accounts.push({ name: account.account_name, authority: permission.perm_name });
                             });
                         });
                         resolve(accounts)
@@ -68,14 +69,14 @@ export default class EOS extends Plugin {
         }
 
         getAccountsFromPublicKey(keypair.publicKey, network).then(accounts => {
-            switch(accounts.length){
+            switch (accounts.length) {
                 case 0: context[Actions.PUSH_ALERT](AlertMsg.NoAccountsFound()); reject(); return false;
                 // Only one account, so returning it
-                case 1: accountSelected(Account.fromJson({name:accounts[0].name, authority:accounts[0].authority, publicKey:keypair.publicKey, keypairUnique:keypair.unique() })); break;
+                case 1: accountSelected(Account.fromJson({ name: accounts[0].name, authority: accounts[0].authority, publicKey: keypair.publicKey, keypairUnique: keypair.unique() })); break;
                 // More than one account, prompting account selection
                 default: context[Actions.PUSH_ALERT](AlertMsg.SelectAccount(accounts)).then(res => {
-                    if(!res || !res.hasOwnProperty('selected')) { reject(); return false; }
-                    accountSelected(Account.fromJson(Object.assign(res.selected, {publicKey:keypair.publicKey, keypairUnique:keypair.unique()})));
+                    if (!res || !res.hasOwnProperty('selected')) { reject(); return false; }
+                    accountSelected(Account.fromJson(Object.assign(res.selected, { publicKey: keypair.publicKey, keypairUnique: keypair.unique() })));
                 })
             }
         }).catch(e => {
@@ -84,19 +85,19 @@ export default class EOS extends Plugin {
         });
     }
 
-    privateToPublic(privateKey){ return ecc.privateToPublic(privateKey); }
-    validPrivateKey(privateKey){ return ecc.isValidPrivate(privateKey); }
-    validPublicKey(publicKey){   return ecc.isValidPublic(publicKey); }
-    randomPrivateKey(){ return ecc.randomKey(); }
-    convertsTo(){
+    privateToPublic(privateKey) { return ecc.privateToPublic(privateKey); }
+    validPrivateKey(privateKey) { return ecc.isValidPrivate(privateKey); }
+    validPublicKey(publicKey) { return ecc.isValidPublic(publicKey); }
+    randomPrivateKey() { return ecc.randomKey(); }
+    convertsTo() {
         return [];
     }
-    from_eth(privateKey){
+    from_eth(privateKey) {
         return ecc.PrivateKey.fromHex(Buffer.from(privateKey, 'hex')).toString();
     }
 
-    async getBalances(account, network, code = 'eosio.token', table = 'accounts'){
-        const eos = Eos({httpEndpoint:`${network.protocol}://${network.hostport()}`, chainId:network.chainId});
+    async getBalances(account, network, code = 'eosio.token', table = 'accounts') {
+        const eos = Eos({ httpEndpoint: `${network.protocol}://${network.hostport()}`, chainId: network.chainId });
         const contract = await eos.contract(code);
         return await eos.getTableRows({
             json: true,
@@ -107,7 +108,7 @@ export default class EOS extends Plugin {
         }).then(res => res.rows.map(row => row.balance.split(' ').reverse()));
     }
 
-    actionParticipants(payload){
+    actionParticipants(payload) {
         return ObjectHelpers.flatten(
             payload.messages
                 .map(message => message.authorization
@@ -115,39 +116,37 @@ export default class EOS extends Plugin {
         );
     }
 
-    signer(bgContext, payload, publicKey, callback, arbitrary = false, isHash = false){
+    signer(bgContext, payload, publicKey, callback, arbitrary = false, isHash = false) {
         bgContext.publicToPrivate(privateKey => {
-            if(!privateKey){
+            if (!privateKey) {
                 callback(null);
                 return false;
             }
 
             let sig;
-            if(arbitrary && isHash) sig = ecc.Signature.signHash(payload.data, privateKey).toString();
+            if (arbitrary && isHash) sig = ecc.Signature.signHash(payload.data, privateKey).toString();
             else sig = ecc.sign(Buffer.from(arbitrary ? payload.data : payload.buf.data, 'utf8'), privateKey);
 
             callback(sig);
         }, publicKey)
     }
 
-    signatureProvider(...args){
-
+    signatureProvider(...args) {
         messageSender = args[0];
         throwIfNoIdentity = args[1];
 
         // Protocol will be deprecated.
         return (network, _eos, _options = {}, protocol = 'http') => {
 
-
-            if(!['http', 'https', 'ws'].includes(protocol))
+            if (!['http', 'https', 'ws'].includes(protocol))
                 throw new Error('Protocol must be either http, https, or ws');
 
             // Backwards compatibility: Networks now have protocols, but some older dapps still use the argument
-            if(!network.hasOwnProperty('protocol') || !network.protocol.length)
+            if (!network.hasOwnProperty('protocol') || !network.protocol.length)
                 network.protocol = protocol;
 
             network = Network.fromJson(network);
-            if(!network.isValid()) throw Error.noNetwork();
+            if (!network.isValid()) throw Error.noNetwork();
             const httpEndpoint = `${network.protocol}://${network.hostport()}`;
 
             const chainId = network.hasOwnProperty('chainId') && network.chainId.length ? network.chainId : _options.chainId;
@@ -155,18 +154,184 @@ export default class EOS extends Plugin {
 
             // The proxy stands between the eosjs object and scatter.
             // This is used to add special functionality like adding `requiredFields` arrays to transactions
-            return proxy(_eos({httpEndpoint, chainId}), {
+
+            // eosjs 20
+            // if (_options.rpc) {
+            //     return proxy(new _eos({ httpEndpoint, chainId }), {
+            //         get(eosInstance, method) {
+            //             let returnedFields = null;
+
+            //             return (...args) => {
+            //                 if (args.find(arg => arg.hasOwnProperty('keyProvider'))) throw Error.usedKeyProvider();
+
+            // let requiredFields = args.find(arg => arg.hasOwnProperty('requiredFields'));
+            // requiredFields = IdentityRequiredFields.fromJson(requiredFields ? requiredFields.requiredFields : {});
+            // if (!requiredFields.isValid()) throw Error.malformedRequiredFields();
+
+            //                 var rpc = new _eos({
+            //                     rpc: _options.rpc
+            //                 });
+
+
+            //                 var hookProvider = function (network, requiredFields, beta3, rpc) {
+            //                     return {
+            //                         requiredFields: {},
+            //                         getAvailableKeys: function () {
+            //                             return [scatter.identity.accounts[0].publicKey];
+            //                         },
+            //                         sign: async function (signargs) {
+            //                             var buffer = Buffer.from(signargs.serializedTransaction, 'hex');
+
+            //                             signargs.serializedTransaction = Buffer.from(signargs.serializedTransaction).toString('hex');
+
+            // signargs.transaction = await rpc.deserializeTransactionWithActions(buffer);
+
+            // signargs.beta3 = beta3;
+
+            // signargs.messages = signargs.transaction;
+
+            //                             signargs.buf = Buffer.concat([
+            //                                 new Buffer(signargs.chainId, "hex"), // Chain ID
+            //                                 buffer, // Transaction
+            //                                 new Buffer(new Uint8Array(32)), // Context free actions
+            //                             ]);
+
+            //                             const payload = Object.assign(signargs, { domain: strippedHost(), network, requiredFields });
+            //                             const result = await messageSender(NetworkMessageTypes.REQUEST_SIGNATURE, payload);
+
+            //                             // No signature
+            //                             if (!result) return null;
+
+            //                             if (result.hasOwnProperty('signatures')) {
+            //                                 // Holding onto the returned fields for the final result
+            //                                 returnedFields = result.returnedFields;
+
+            //                                 // Grabbing buf signatures from local multi sig sign provider
+            //                                 // let multiSigKeyProvider = args.find(arg => arg.hasOwnProperty('signProvider'));
+            //                                 // if (multiSigKeyProvider) {
+            //                                 //     result.signatures.push(multiSigKeyProvider.signProvider(signargs.buf, signargs.sign));
+            //                                 // }
+
+            //                                 // Returning only the signatures to eosjs
+            //                                 return {
+            //                                     signatures: result.signatures,
+            //                                     serializedTransaction: Buffer.from(signargs.serializedTransaction, 'hex')
+
+            //                                 }
+            //                             }
+
+            //                             return result;
+            //                         }
+            //                     }
+            //                 }
+
+            //                 var signatureProvider = hookProvider(network, requiredFields, _options.beta3 || true, rpc);
+
+
+            //                 // TODO: We need to check about the implications of multiple eosjs instances
+            //                 return new Promise((resolve, reject) => {
+            //                     new _eos(Object.assign(_options, { signatureProvider: signatureProvider }))[method](...args)
+            //                         .then(result => {
+
+            //                             // Standard method ( ie. not contract )
+            //                             if (!result.hasOwnProperty('fc')) {
+            //                                 result = Object.assign(result, { returnedFields });
+            //                                 resolve(result);
+            //                                 return;
+            //                             }
+
+            //                         }).catch(error => reject(error))
+            //                 })
+            //             }
+            //         }
+            //     });
+            // }
+
+            if (_options.rpc) {
+
+                let requiredFields = args.find(arg => arg.hasOwnProperty('requiredFields'));
+                requiredFields = IdentityRequiredFields.fromJson(requiredFields ? requiredFields.requiredFields : {});
+                if (!requiredFields.isValid()) throw Error.malformedRequiredFields();
+
+                var api = new _eos({
+                    rpc: _options.rpc
+                })
+
+                var hookProvider = function (network, requiredFields, beta3, api) {
+                    return {
+                        requiredFields: {},
+                        getAvailableKeys: function () {
+                            return [scatter.identity.accounts[0].publicKey];
+                        },
+                        sign: async function (signargs) {
+                            var buffer = Buffer.from(signargs.serializedTransaction, 'hex');
+
+                            signargs.serializedTransaction = Buffer.from(signargs.serializedTransaction).toString('hex');
+
+                            // signargs.transaction = api.deserializeTransaction(buffer);
+
+
+                            signargs.transaction = await api.deserializeTransactionWithActions(buffer);
+
+                            signargs.beta3 = beta3;
+
+                            signargs.messages = signargs.transaction.actions;
+
+                            for (var i = 0; i < signargs.messages.length; i++) {
+                                signargs.messages[i].code = signargs.messages[i].account;
+
+                                signargs.messages[i].type = signargs.messages[i].name;
+                            }
+
+                            signargs.buf = Buffer.concat([
+                                new Buffer(signargs.chainId, "hex"), // Chain ID
+                                buffer, // Transaction
+                                new Buffer(new Uint8Array(32)), // Context free actions
+                            ]);
+
+                            const payload = Object.assign(signargs, { domain: strippedHost(), network, requiredFields });
+                            const result = await messageSender(NetworkMessageTypes.REQUEST_SIGNATURE, payload);
+
+                            // No signature
+                            if (!result) return null;
+
+                            if (result.hasOwnProperty('signatures')) {
+
+                                return {
+                                    signatures: result.signatures,
+                                    serializedTransaction: Buffer.from(signargs.serializedTransaction, 'hex')
+
+                                }
+                            }
+
+                            return result;
+
+                            return _this.signProvider('eos')(signargs);
+                        }
+                    }
+                }
+
+                var signatureProvider = hookProvider(network, requiredFields, _options.beta3 || true, api)
+
+                return new _eos(Object.assign(_options, {
+                    signatureProvider: signatureProvider
+                }))
+                // return new _eos({ rpc: _options.rpc, chainId })
+            }
+
+            // eosjs 16.0.9 and before
+            return proxy(_eos({ httpEndpoint, chainId }), {
                 get(eosInstance, method) {
 
                     let returnedFields = null;
 
                     return (...args) => {
 
-                        if(args.find(arg => arg.hasOwnProperty('keyProvider'))) throw Error.usedKeyProvider();
+                        if (args.find(arg => arg.hasOwnProperty('keyProvider'))) throw Error.usedKeyProvider();
 
                         let requiredFields = args.find(arg => arg.hasOwnProperty('requiredFields'));
                         requiredFields = IdentityRequiredFields.fromJson(requiredFields ? requiredFields.requiredFields : {});
-                        if(!requiredFields.isValid()) throw Error.malformedRequiredFields();
+                        if (!requiredFields.isValid()) throw Error.malformedRequiredFields();
 
                         // The signature provider which gets elevated into the user's Scatter
                         const signProvider = async signargs => {
@@ -175,19 +340,19 @@ export default class EOS extends Plugin {
                             // Friendly formatting
                             signargs.messages = await requestParser(signargs, network);
 
-                            const payload = Object.assign(signargs, { domain:strippedHost(), network, requiredFields });
+                            const payload = Object.assign(signargs, { domain: strippedHost(), network, requiredFields });
                             const result = await messageSender(NetworkMessageTypes.REQUEST_SIGNATURE, payload);
 
                             // No signature
-                            if(!result) return null;
+                            if (!result) return null;
 
-                            if(result.hasOwnProperty('signatures')){
+                            if (result.hasOwnProperty('signatures')) {
                                 // Holding onto the returned fields for the final result
                                 returnedFields = result.returnedFields;
 
                                 // Grabbing buf signatures from local multi sig sign provider
                                 let multiSigKeyProvider = args.find(arg => arg.hasOwnProperty('signProvider'));
-                                if(multiSigKeyProvider){
+                                if (multiSigKeyProvider) {
                                     result.signatures.push(multiSigKeyProvider.signProvider(signargs.buf, signargs.sign));
                                 }
 
@@ -200,24 +365,24 @@ export default class EOS extends Plugin {
 
                         // TODO: We need to check about the implications of multiple eosjs instances
                         return new Promise((resolve, reject) => {
-                            _eos(Object.assign(_options, {httpEndpoint, signProvider, chainId}))[method](...args)
+                            _eos(Object.assign(_options, { httpEndpoint, signProvider, chainId }))[method](...args)
                                 .then(result => {
 
                                     // Standard method ( ie. not contract )
-                                    if(!result.hasOwnProperty('fc')){
-                                        result = Object.assign(result, {returnedFields});
+                                    if (!result.hasOwnProperty('fc')) {
+                                        result = Object.assign(result, { returnedFields });
                                         resolve(result);
                                         return;
                                     }
 
                                     // Catching chained promise methods ( contract .then action )
                                     const contractProxy = proxy(result, {
-                                        get(instance,method){
-                                            if(method === 'then') return instance[method];
+                                        get(instance, method) {
+                                            if (method === 'then') return instance[method];
                                             return (...args) => {
                                                 return new Promise(async (res, rej) => {
                                                     instance[method](...args).then(actionResult => {
-                                                        res(Object.assign(actionResult, {returnedFields}));
+                                                        res(Object.assign(actionResult, { returnedFields }));
                                                     }).catch(rej);
                                                 })
 
@@ -235,12 +400,12 @@ export default class EOS extends Plugin {
     }
 }
 
-const requestParser = async (signargs, network) => {
-    const eos = Eos({httpEndpoint:network.fullhost(), chainId:network.chainId});
+const requestParser = async (signargs, network, rpc) => {
+    const eos = Eos({ httpEndpoint: network.fullhost(), chainId: network.chainId });
 
     const contracts = signargs.transaction.actions.map(action => action.account)
         .reduce((acc, contract) => {
-            if(!acc.includes(contract)) acc.push(contract);
+            if (!acc.includes(contract)) acc.push(contract);
             return acc;
         }, []);
 
@@ -249,23 +414,35 @@ const requestParser = async (signargs, network) => {
 
     await Promise.all(contracts.map(async contractAccount => {
         const cachedABI = await Promise.race([
-            messageSender(NetworkMessageTypes.ABI_CACHE, {abiContractName:contractAccount, abiGet:true, chainId:network.chainId}),
+            messageSender(NetworkMessageTypes.ABI_CACHE, { abiContractName: contractAccount, abiGet: true, chainId: network.chainId }),
             new Promise(resolve => setTimeout(() => resolve('no cache'), 500))
         ]);
 
-        if(cachedABI === 'object' && cachedABI.timestamp > +new Date((await eos.getAccount(contractAccount)).last_code_update))
+        if (cachedABI === 'object' && cachedABI.timestamp > +new Date((await eos.getAccount(contractAccount)).last_code_update))
             abis[contractAccount] = eos.fc.abiCache.abi(contractAccount, cachedABI.abi);
 
         else {
-            abis[contractAccount] = (await eos.contract(contractAccount)).fc;
-            const savableAbi = JSON.parse(JSON.stringify(abis[contractAccount]));
-            delete savableAbi.schema;
-            delete savableAbi.structs;
-            delete savableAbi.types;
-            savableAbi.timestamp = +new Date();
+            let savableAbi;
+
+            if (rpc) {
+                var abi = await rpc.getAbi(contractAccount);
+                abis[contractAccount] = { "abi": abi };
+
+                savableAbi = JSON.parse(JSON.stringify(abis[contractAccount]));
+                savableAbi.timestamp = +new Date();
+            }
+            else {
+                abis[contractAccount] = (await eos.contract(contractAccount)).fc;
+
+                savableAbi = JSON.parse(JSON.stringify(abis[contractAccount]));
+                delete savableAbi.schema;
+                delete savableAbi.structs;
+                delete savableAbi.types;
+                savableAbi.timestamp = +new Date();
+            }
 
             await messageSender(NetworkMessageTypes.ABI_CACHE,
-                {abiContractName: contractAccount, abi:savableAbi, abiGet: false, chainId:network.chainId});
+                { abiContractName: contractAccount, abi: savableAbi, abiGet: false, chainId: network.chainId });
         }
     }));
 
@@ -279,17 +456,17 @@ const requestParser = async (signargs, network) => {
         const actionAbi = abi.abi.actions.find(fcAction => fcAction.name === action.name);
         let ricardian = actionAbi ? actionAbi.ricardian_contract : null;
 
-        if(ricardian){
-            const htmlFormatting = {h1:'div class="ricardian-action"', h2:'div class="ricardian-description"'};
+        if (ricardian) {
+            const htmlFormatting = { h1: 'div class="ricardian-action"', h2: 'div class="ricardian-description"' };
             const signer = action.authorization.length === 1 ? action.authorization[0].actor : null;
             ricardian = ricardianParser.parse(action.name, data, ricardian, signer, htmlFormatting);
         }
 
         return {
             data,
-            code:action.account,
-            type:action.name,
-            authorization:action.authorization,
+            code: action.account,
+            type: action.name,
+            authorization: action.authorization,
             ricardian
         };
     }));
